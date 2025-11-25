@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Handwritten Digit Input Canvas</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        /* Custom styles for the drawing canvas */
+        #drawingCanvas {
+            border: 2px solid #4B5563; /* Gray border */
+            cursor: crosshair;
+            background-color: #000000; /* Black background for MNIST style */
+        }
+        .image-rendering-pixelated {
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4 font-sans">
+
+    <div class="w-full max-w-2xl bg-white p-6 rounded-xl shadow-2xl space-y-6">
+        <h1 class="text-3xl font-extrabold text-gray-800 text-center border-b pb-2">
+            Draw Your Digit
+        </h1>
+        <p class="text-sm text-gray-600 text-center">
+            Draw a single digit (0-9) on the canvas below.
+        </p>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+            <!-- Drawing Area -->
+            <div class="flex flex-col items-center space-y-4">
+                <label for="lineWidth" class="text-gray-700 text-sm font-semibold">
+                    Pen Thickness: <span id="lineWidthValue" class="text-blue-600">20</span>px
+                </label>
+                <input type="range" id="lineWidth" min="10" max="30" value="20" 
+                       class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer range-lg">
+                
+                <!-- The Drawing Canvas -->
+                <canvas id="drawingCanvas" width="280" height="280" class="w-full h-auto rounded-lg"></canvas>
+
+                <!-- Controls -->
+                <div class="flex justify-between w-full space-x-2">
+                    <button id="clearButton" class="w-full py-2 px-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-lg transition duration-200 shadow-md hover:shadow-lg">
+                        Clear Canvas
+                    </button>
+                    <button id="processButton" class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition duration-200 shadow-md hover:shadow-lg">
+                        Predict Digit
+                    </button>
+                </div>
+            </div>
+
+            <!-- Preprocessed Output Area -->
+            <div class="flex flex-col items-center space-y-4 bg-gray-50 p-4 rounded-lg border">
+                <h2 class="text-xl font-bold text-gray-800">Model Input Preview (28x28)</h2>
+                <div class="text-sm text-gray-500">
+                    This is what gets sent to the Python Server.
+                </div>
+                <!-- Preprocessed 28x28 output canvas -->
+                <canvas id="previewCanvas" width="28" height="28" class="border-2 border-green-500 w-32 h-32 image-rendering-pixelated rounded-lg shadow-inner"></canvas>
+                
+                <div id="predictionResult" class="text-center">
+                    <div class="text-xl font-bold text-gray-700">Predicted Digit:</div>
+                    <div id="predictedDigit" class="text-6xl font-extrabold text-blue-600">?</div>
+                    <div id="accuracyPercentage" class="text-lg font-semibold text-gray-700">Confidence: <span class="text-gray-500">--%</span></div>
+                </div>
+                
+                <div id="pixelDataOutput" class="w-full h-32 bg-gray-200 overflow-y-scroll p-2 text-xs font-mono rounded-lg border border-gray-300 hidden">
+                    <!-- Raw pixel array will be displayed here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // UI elements
+        const resultDiv = document.getElementById('predictionResult');
+        const predictedDigitDiv = document.getElementById('predictedDigit');
+        const accuracyPercentageDiv = document.getElementById('accuracyPercentage');
+        
+        // Get canvas and context for drawing
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Get canvas and context for the 28x28 preview
+        const previewCanvas = document.getElementById('previewCanvas');
+        const previewCtx = previewCanvas.getContext('2d');
+
+        const clearButton = document.getElementById('clearButton');
+        const processButton = document.getElementById('processButton');
+        const lineWidthInput = document.getElementById('lineWidth');
+        const lineWidthValueSpan = document.getElementById('lineWidthValue');
+        const pixelDataOutput = document.getElementById('pixelDataOutput');
+        
+        // Drawing state
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let penThickness = parseInt(lineWidthInput.value);
+
+        // --- Canvas Setup ---
+        function initializeCanvas() {
+            ctx.lineWidth = penThickness;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = 'white';
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // --- Drawing Logic ---
+        function draw(e, clientX, clientY) {
+            if (!isDrawing) return;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            let x = (clientX - rect.left) * scaleX;
+            let y = (clientY - rect.top) * scaleY;
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            [lastX, lastY] = [x, y];
+        }
+
+        // --- Mouse Event Handlers ---
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            [lastX, lastY] = [(e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY];
+        });
+
+        canvas.addEventListener('mousemove', (e) => draw(e, e.clientX, e.clientY));
+        canvas.addEventListener('mouseup', () => isDrawing = false);
+        canvas.addEventListener('mouseout', () => isDrawing = false);
+
+        // --- Touch Event Handlers ---
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                isDrawing = true;
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                [lastX, lastY] = [(touch.clientX - rect.left) * scaleX, (touch.clientY - rect.top) * scaleY];
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1 && isDrawing) {
+                const touch = e.touches[0];
+                draw(e, touch.clientX, touch.clientY);
+            }
+        });
+
+        canvas.addEventListener('touchend', () => isDrawing = false);
+
+        // --- UI Control Handlers ---
+        clearButton.addEventListener('click', () => {
+            initializeCanvas();
+            predictedDigitDiv.textContent = '?';
+            accuracyPercentageDiv.innerHTML = 'Confidence: <span class="text-gray-500">--%</span>';
+            previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+            pixelDataOutput.classList.add('hidden');
+        });
+
+        lineWidthInput.addEventListener('input', (e) => {
+            penThickness = parseInt(e.target.value);
+            ctx.lineWidth = penThickness;
+            lineWidthValueSpan.textContent = penThickness;
+        });
+
+        // --- Prediction Logic (Using Python Server) ---
+        processButton.addEventListener('click', () => {
+            processImageAndPredict();
+        });
+
+        async function processImageAndPredict() {
+            predictedDigitDiv.textContent = '...';
+            
+            // 1. Create a temporary 28x28 canvas for resizing
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 28;
+            tempCanvas.height = 28;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // 2. Draw main canvas to temp (Resize)
+            tempCtx.drawImage(canvas, 0, 0, 28, 28);
+            const imageData = tempCtx.getImageData(0, 0, 28, 28);
+            const data = imageData.data;
+            
+            // 3. Convert to simple array of grayscale values (0-1)
+            const normalizedData = [];
+            
+            for (let i = 0; i < data.length; i += 4) {
+                const normalizedValue = data[i] / 255.0; 
+                normalizedData.push(normalizedValue);
+            }
+
+            // 4. Update Preview
+            previewCtx.putImageData(imageData, 0, 0);
+
+            // 5. Send to Python Server
+            try {
+                // Ensure this matches your server address
+                const response = await fetch('http://127.0.0.1:5000/predict', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pixels: normalizedData })
+                });
+                
+                if (!response.ok) throw new Error("Server Error");
+                
+                const result = await response.json();
+                
+                if (result.error) {
+                    alert("Error: " + result.error);
+                } else {
+                    predictedDigitDiv.textContent = result.digit;
+                    accuracyPercentageDiv.innerHTML = `Confidence: <span class="text-green-600 font-bold">${result.confidence.toFixed(2)}%</span>`;
+                }
+            } catch (error) {
+                console.error(error);
+                predictedDigitDiv.textContent = 'Err';
+                accuracyPercentageDiv.innerHTML = '<span class="text-red-500 text-xs">Is server.py running?</span>';
+            }
+        }
+
+        // --- Initialization ---
+        window.onload = function() {
+            initializeCanvas();
+        }
+    </script>
+</body>
+</html>
